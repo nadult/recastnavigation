@@ -50,7 +50,7 @@ TestCase::~TestCase()
 }
 
 
-static char* parseRow(char* buf, char* bufEnd, char* row, int len)
+static char* parseTestRow(char* buf, char* bufEnd, char* row, int len)
 {
 	bool start = true;
 	bool done = false;
@@ -121,7 +121,7 @@ bool TestCase::load(const char* filePath)
 	{
 		// Parse one row
 		row[0] = '\0';
-		src = parseRow(src, srcEnd, row, sizeof(row)/sizeof(char));
+		src = parseTestRow(src, srcEnd, row, sizeof(row)/sizeof(char));
 		if (row[0] == 's')
 		{
 			// Sample name.

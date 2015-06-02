@@ -286,7 +286,7 @@ bool InputGeom::save(const char* filepath)
 	return true;
 }
 
-static bool isectSegAABB(const float* sp, const float* sq,
+static bool isectSegAABB_(const float* sp, const float* sq,
 						 const float* amin, const float* amax,
 						 float& tmin, float& tmax)
 {
@@ -329,7 +329,7 @@ bool InputGeom::raycastMesh(float* src, float* dst, float& tmin)
 
 	// Prune hit ray.
 	float btmin, btmax;
-	if (!isectSegAABB(src, dst, m_meshBMin, m_meshBMax, btmin, btmax))
+	if (!isectSegAABB_(src, dst, m_meshBMin, m_meshBMax, btmin, btmax))
 		return false;
 	float p[2], q[2];
 	p[0] = src[0] + (dst[0]-src[0])*btmin;

@@ -76,7 +76,7 @@ void rcMeshLoaderObj::addTriangle(int a, int b, int c, int& cap)
 	m_triCount++;
 }
 
-static char* parseRow(char* buf, char* bufEnd, char* row, int len)
+static char* parseMeshRow(char* buf, char* bufEnd, char* row, int len)
 {
 	bool start = true;
 	bool done = false;
@@ -172,7 +172,7 @@ bool rcMeshLoaderObj::load(const char* filename)
 	{
 		// Parse one row
 		row[0] = '\0';
-		src = parseRow(src, srcEnd, row, sizeof(row)/sizeof(char));
+		src = parseMeshRow(src, srcEnd, row, sizeof(row)/sizeof(char));
 		// Skip comments
 		if (row[0] == '#') continue;
 		if (row[0] == 'v' && row[1] != 'n' && row[1] != 't')

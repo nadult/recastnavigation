@@ -25,6 +25,7 @@
 #include "Recast.h"
 #include "RecastAlloc.h"
 #include "RecastAssert.h"
+#include "RecastShared.h"
 
 
 static const unsigned RC_UNSET_HEIGHT = 0xffff;
@@ -507,21 +508,18 @@ static float polyMinExtent(const float* verts, const int nverts)
 	return rcSqrt(minDist);
 }
 
-// Last time I checked the if version got compiled using cmov, which was a lot faster than module (with idiv).
-inline int prev(int i, int n) { return i-1 >= 0 ? i-1 : n-1; }
-inline int next(int i, int n) { return i+1 < n ? i+1 : 0; }
-
 static void triangulateHull(const int nverts, const float* verts, const int nhull, const int* hull, rcIntArray& tris)
 {
 	int start = 0, left = 1, right = nhull-1;
-	
+
+
 	// Start from an ear with shortest perimeter.
 	// This tends to favor well formed triangles as starting point.
 	float dmin = 0;
 	for (int i = 0; i < nhull; i++)
 	{
-		int pi = prev(i, nhull);
-		int ni = next(i, nhull);
+		int pi = prevWrapped(i, nhull);
+		int ni = nextWrapped(i, nhull);
 		const float* pv = &verts[hull[pi]*3];
 		const float* cv = &verts[hull[i]*3];
 		const float* nv = &verts[hull[ni]*3];
@@ -545,11 +543,11 @@ static void triangulateHull(const int nverts, const float* verts, const int nhul
 	// depending on which triangle has shorter perimeter.
 	// This heuristic was chose emprically, since it seems
 	// handle tesselated straight edges well.
-	while (next(left, nhull) != right)
+	while (nextWrapped(left, nhull) != right)
 	{
 		// Check to see if se should advance left or right.
-		int nleft = next(left, nhull);
-		int nright = prev(right, nhull);
+		int nleft = nextWrapped(left, nhull);
+		int nright = prevWrapped(right, nhull);
 		
 		const float* cvleft = &verts[hull[left]*3];
 		const float* nvleft = &verts[hull[nleft]*3];

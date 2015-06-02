@@ -24,7 +24,7 @@
 #include "Recast.h"
 #include "RecastAlloc.h"
 #include "RecastAssert.h"
-
+#include "RecastShared.h"
 
 static int getCornerHeight(int x, int y, int i, int dir,
 						   const rcCompactHeightfield& chf,
@@ -182,29 +182,6 @@ static void walkContour(int x, int y, int i,
 			break;
 		}
 	}
-}
-
-static float distancePtSeg(const int x, const int z,
-						   const int px, const int pz,
-						   const int qx, const int qz)
-{
-	float pqx = (float)(qx - px);
-	float pqz = (float)(qz - pz);
-	float dx = (float)(x - px);
-	float dz = (float)(z - pz);
-	float d = pqx*pqx + pqz*pqz;
-	float t = pqx*dx + pqz*dz;
-	if (d > 0)
-		t /= d;
-	if (t < 0)
-		t = 0;
-	else if (t > 1)
-		t = 1;
-	
-	dx = px + t*pqx - x;
-	dz = pz + t*pqz - z;
-	
-	return dx*dx + dz*dz;
 }
 
 static void simplifyContour(rcIntArray& points, rcIntArray& simplified,
@@ -463,91 +440,15 @@ static int calcAreaOfPolygon2D(const int* verts, const int nverts)
 	return (area+1) / 2;
 }
 
-// TODO: these are the same as in RecastMesh.cpp, consider using the same.
-// Last time I checked the if version got compiled using cmov, which was a lot faster than module (with idiv).
-inline int prev(int i, int n) { return i-1 >= 0 ? i-1 : n-1; }
-inline int next(int i, int n) { return i+1 < n ? i+1 : 0; }
 
-inline int area2(const int* a, const int* b, const int* c)
-{
-	return (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
-}
 
-//	Exclusive or: true iff exactly one argument is true.
-//	The arguments are negated to ensure that they are 0/1
-//	values.  Then the bitwise Xor operator may apply.
-//	(This idea is due to Michael Baldwin.)
-inline bool xorb(bool x, bool y)
-{
-	return !x ^ !y;
-}
-
-// Returns true iff c is strictly to the left of the directed
-// line through a to b.
-inline bool left(const int* a, const int* b, const int* c)
-{
-	return area2(a, b, c) < 0;
-}
-
-inline bool leftOn(const int* a, const int* b, const int* c)
-{
-	return area2(a, b, c) <= 0;
-}
-
-inline bool collinear(const int* a, const int* b, const int* c)
-{
-	return area2(a, b, c) == 0;
-}
-
-//	Returns true iff ab properly intersects cd: they share
-//	a point interior to both segments.  The properness of the
-//	intersection is ensured by using strict leftness.
-static bool intersectProp(const int* a, const int* b, const int* c, const int* d)
-{
-	// Eliminate improper cases.
-	if (collinear(a,b,c) || collinear(a,b,d) ||
-		collinear(c,d,a) || collinear(c,d,b))
-		return false;
-	
-	return xorb(left(a,b,c), left(a,b,d)) && xorb(left(c,d,a), left(c,d,b));
-}
-
-// Returns T iff (a,b,c) are collinear and point c lies
-// on the closed segement ab.
-static bool between(const int* a, const int* b, const int* c)
-{
-	if (!collinear(a, b, c))
-		return false;
-	// If ab not vertical, check betweenness on x; else on y.
-	if (a[0] != b[0])
-		return	((a[0] <= c[0]) && (c[0] <= b[0])) || ((a[0] >= c[0]) && (c[0] >= b[0]));
-	else
-		return	((a[2] <= c[2]) && (c[2] <= b[2])) || ((a[2] >= c[2]) && (c[2] >= b[2]));
-}
-
-// Returns true iff segments ab and cd intersect, properly or improperly.
-static bool intersect(const int* a, const int* b, const int* c, const int* d)
-{
-	if (intersectProp(a, b, c, d))
-		return true;
-	else if (between(a, b, c) || between(a, b, d) ||
-			 between(c, d, a) || between(c, d, b))
-		return true;
-	else
-		return false;
-}
-
-static bool vequal(const int* a, const int* b)
-{
-	return a[0] == b[0] && a[2] == b[2];
-}
 
 static bool intersectSegCountour(const int* d0, const int* d1, int i, int n, const int* verts)
 {
 	// For each edge (k,k+1) of P
 	for (int k = 0; k < n; k++)
 	{
-		int k1 = next(k, n);
+		int k1 = nextWrapped(k, n);
 		// Skip edges incident to i.
 		if (i == k || i == k1)
 			continue;
@@ -565,8 +466,8 @@ static bool intersectSegCountour(const int* d0, const int* d1, int i, int n, con
 static bool	inCone(int i, int n, const int* verts, const int* pj)
 {
 	const int* pi = &verts[i * 4];
-	const int* pi1 = &verts[next(i, n) * 4];
-	const int* pin1 = &verts[prev(i, n) * 4];
+	const int* pi1 = &verts[nextWrapped(i, n) * 4];
+	const int* pin1 = &verts[prevWrapped(i, n) * 4];
 	
 	// If P[i] is a convex vertex [ i+1 left or on (i-1,i) ].
 	if (leftOn(pin1, pi, pi1))
@@ -584,7 +485,7 @@ static void removeDegenerateSegments(rcIntArray& simplified)
 	int npts = simplified.size()/4;
 	for (int i = 0; i < npts; ++i)
 	{
-		int ni = next(i, npts);
+		int ni = nextWrapped(i, npts);
 		
 		if (vequal(&simplified[i*4], &simplified[ni*4]))
 		{

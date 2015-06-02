@@ -6,6 +6,7 @@
 #include "DetourMath.h"
 #include "DetourAlloc.h"
 #include "DetourAssert.h"
+#include "DetourShared.h"
 #include <string.h>
 #include <new>
 
@@ -23,41 +24,36 @@ void dtFreeTileCache(dtTileCache* tc)
 	dtFree(tc);
 }
 
-static bool contains(const dtCompressedTileRef* a, const int n, const dtCompressedTileRef v)
-{
-	for (int i = 0; i < n; ++i)
-		if (a[i] == v)
-			return true;
-	return false;
-}
+namespace {
 
-inline int computeTileHash(int x, int y, const int mask)
-{
-	const unsigned int h1 = 0x8da6b343; // Large multiplicative constants;
-	const unsigned int h2 = 0xd8163841; // here arbitrarily chosen primes
-	unsigned int n = h1 * x + h2 * y;
-	return (int)(n & mask);
-}
-
-
-struct BuildContext
-{
-	inline BuildContext(struct dtTileCacheAlloc* a) : layer(0), lcset(0), lmesh(0), alloc(a) {}
-	inline ~BuildContext() { purge(); }
-	void purge()
+	bool contains(const dtCompressedTileRef* a, const int n, const dtCompressedTileRef v)
 	{
-		dtFreeTileCacheLayer(alloc, layer);
-		layer = 0;
-		dtFreeTileCacheContourSet(alloc, lcset);
-		lcset = 0;
-		dtFreeTileCachePolyMesh(alloc, lmesh);
-		lmesh = 0;
+		for (int i = 0; i < n; ++i)
+			if (a[i] == v)
+				return true;
+		return false;
 	}
-	struct dtTileCacheLayer* layer;
-	struct dtTileCacheContourSet* lcset;
-	struct dtTileCachePolyMesh* lmesh;
-	struct dtTileCacheAlloc* alloc;
-};
+
+	struct BuildContext
+	{
+		inline BuildContext(struct dtTileCacheAlloc* a) : layer(0), lcset(0), lmesh(0), alloc(a) {}
+		inline ~BuildContext() { purge(); }
+		void purge()
+		{
+			dtFreeTileCacheLayer(alloc, layer);
+			layer = 0;
+			dtFreeTileCacheContourSet(alloc, lcset);
+			lcset = 0;
+			dtFreeTileCachePolyMesh(alloc, lmesh);
+			lmesh = 0;
+		}
+		struct dtTileCacheLayer* layer;
+		struct dtTileCacheContourSet* lcset;
+		struct dtTileCachePolyMesh* lmesh;
+		struct dtTileCacheAlloc* alloc;
+	};
+
+}
 
 
 dtTileCache::dtTileCache() :

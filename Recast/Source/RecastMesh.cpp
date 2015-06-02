@@ -23,13 +23,7 @@
 #include "Recast.h"
 #include "RecastAlloc.h"
 #include "RecastAssert.h"
-
-struct rcEdge
-{
-	unsigned short vert[2];
-	unsigned short polyEdge[2];
-	unsigned short poly[2];
-};
+#include "RecastShared.h"
 
 static bool buildMeshAdjacency(unsigned short* polys, const int npolys,
 							   const int nverts, const int vertsPerPoly)
@@ -160,84 +154,6 @@ static unsigned short addVertex(unsigned short x, unsigned short y, unsigned sho
 	return (unsigned short)i;
 }
 
-// Last time I checked the if version got compiled using cmov, which was a lot faster than module (with idiv).
-inline int prev(int i, int n) { return i-1 >= 0 ? i-1 : n-1; }
-inline int next(int i, int n) { return i+1 < n ? i+1 : 0; }
-
-inline int area2(const int* a, const int* b, const int* c)
-{
-	return (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
-}
-
-//	Exclusive or: true iff exactly one argument is true.
-//	The arguments are negated to ensure that they are 0/1
-//	values.  Then the bitwise Xor operator may apply.
-//	(This idea is due to Michael Baldwin.)
-inline bool xorb(bool x, bool y)
-{
-	return !x ^ !y;
-}
-
-// Returns true iff c is strictly to the left of the directed
-// line through a to b.
-inline bool left(const int* a, const int* b, const int* c)
-{
-	return area2(a, b, c) < 0;
-}
-
-inline bool leftOn(const int* a, const int* b, const int* c)
-{
-	return area2(a, b, c) <= 0;
-}
-
-inline bool collinear(const int* a, const int* b, const int* c)
-{
-	return area2(a, b, c) == 0;
-}
-
-//	Returns true iff ab properly intersects cd: they share
-//	a point interior to both segments.  The properness of the
-//	intersection is ensured by using strict leftness.
-static bool intersectProp(const int* a, const int* b, const int* c, const int* d)
-{
-	// Eliminate improper cases.
-	if (collinear(a,b,c) || collinear(a,b,d) ||
-		collinear(c,d,a) || collinear(c,d,b))
-		return false;
-	
-	return xorb(left(a,b,c), left(a,b,d)) && xorb(left(c,d,a), left(c,d,b));
-}
-
-// Returns T iff (a,b,c) are collinear and point c lies 
-// on the closed segement ab.
-static bool between(const int* a, const int* b, const int* c)
-{
-	if (!collinear(a, b, c))
-		return false;
-	// If ab not vertical, check betweenness on x; else on y.
-	if (a[0] != b[0])
-		return	((a[0] <= c[0]) && (c[0] <= b[0])) || ((a[0] >= c[0]) && (c[0] >= b[0]));
-	else
-		return	((a[2] <= c[2]) && (c[2] <= b[2])) || ((a[2] >= c[2]) && (c[2] >= b[2]));
-}
-
-// Returns true iff segments ab and cd intersect, properly or improperly.
-static bool intersect(const int* a, const int* b, const int* c, const int* d)
-{
-	if (intersectProp(a, b, c, d))
-		return true;
-	else if (between(a, b, c) || between(a, b, d) ||
-			 between(c, d, a) || between(c, d, b))
-		return true;
-	else
-		return false;
-}
-
-static bool vequal(const int* a, const int* b)
-{
-	return a[0] == b[0] && a[2] == b[2];
-}
-
 // Returns T iff (v_i, v_j) is a proper internal *or* external
 // diagonal of P, *ignoring edges incident to v_i and v_j*.
 static bool diagonalie(int i, int j, int n, const int* verts, int* indices)
@@ -248,7 +164,7 @@ static bool diagonalie(int i, int j, int n, const int* verts, int* indices)
 	// For each edge (k,k+1) of P
 	for (int k = 0; k < n; k++)
 	{
-		int k1 = next(k, n);
+		int k1 = nextWrapped(k, n);
 		// Skip edges incident to i or j
 		if (!((k == i) || (k1 == i) || (k == j) || (k1 == j)))
 		{
@@ -271,8 +187,8 @@ static bool	inCone(int i, int j, int n, const int* verts, int* indices)
 {
 	const int* pi = &verts[(indices[i] & 0x0fffffff) * 4];
 	const int* pj = &verts[(indices[j] & 0x0fffffff) * 4];
-	const int* pi1 = &verts[(indices[next(i, n)] & 0x0fffffff) * 4];
-	const int* pin1 = &verts[(indices[prev(i, n)] & 0x0fffffff) * 4];
+	const int* pi1 = &verts[(indices[nextWrapped(i, n)] & 0x0fffffff) * 4];
+	const int* pin1 = &verts[(indices[prevWrapped(i, n)] & 0x0fffffff) * 4];
 
 	// If P[i] is a convex vertex [ i+1 left or on (i-1,i) ].
 	if (leftOn(pin1, pi, pi1))
@@ -298,7 +214,7 @@ static bool diagonalieLoose(int i, int j, int n, const int* verts, int* indices)
 	// For each edge (k,k+1) of P
 	for (int k = 0; k < n; k++)
 	{
-		int k1 = next(k, n);
+		int k1 = nextWrapped(k, n);
 		// Skip edges incident to i or j
 		if (!((k == i) || (k1 == i) || (k == j) || (k1 == j)))
 		{
@@ -319,8 +235,8 @@ static bool	inConeLoose(int i, int j, int n, const int* verts, int* indices)
 {
 	const int* pi = &verts[(indices[i] & 0x0fffffff) * 4];
 	const int* pj = &verts[(indices[j] & 0x0fffffff) * 4];
-	const int* pi1 = &verts[(indices[next(i, n)] & 0x0fffffff) * 4];
-	const int* pin1 = &verts[(indices[prev(i, n)] & 0x0fffffff) * 4];
+	const int* pi1 = &verts[(indices[nextWrapped(i, n)] & 0x0fffffff) * 4];
+	const int* pin1 = &verts[(indices[prevWrapped(i, n)] & 0x0fffffff) * 4];
 	
 	// If P[i] is a convex vertex [ i+1 left or on (i-1,i) ].
 	if (leftOn(pin1, pi, pi1))
@@ -344,8 +260,8 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 	// The last bit of the index is used to indicate if the vertex can be removed.
 	for (int i = 0; i < n; i++)
 	{
-		int i1 = next(i, n);
-		int i2 = next(i1, n);
+		int i1 = nextWrapped(i, n);
+		int i2 = nextWrapped(i1, n);
 		if (diagonal(i, i2, n, verts, indices))
 			indices[i1] |= 0x80000000;
 	}
@@ -356,11 +272,11 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 		int mini = -1;
 		for (int i = 0; i < n; i++)
 		{
-			int i1 = next(i, n);
+			int i1 = nextWrapped(i, n);
 			if (indices[i1] & 0x80000000)
 			{
 				const int* p0 = &verts[(indices[i] & 0x0fffffff) * 4];
-				const int* p2 = &verts[(indices[next(i1, n)] & 0x0fffffff) * 4];
+				const int* p2 = &verts[(indices[nextWrapped(i1, n)] & 0x0fffffff) * 4];
 				
 				int dx = p2[0] - p0[0];
 				int dy = p2[2] - p0[2];
@@ -388,12 +304,12 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 			mini = -1;
 			for (int i = 0; i < n; i++)
 			{
-				int i1 = next(i, n);
-				int i2 = next(i1, n);
+				int i1 = nextWrapped(i, n);
+				int i2 = nextWrapped(i1, n);
 				if (diagonalLoose(i, i2, n, verts, indices))
 				{
 					const int* p0 = &verts[(indices[i] & 0x0fffffff) * 4];
-					const int* p2 = &verts[(indices[next(i2, n)] & 0x0fffffff) * 4];
+					const int* p2 = &verts[(indices[nextWrapped(i2, n)] & 0x0fffffff) * 4];
 					int dx = p2[0] - p0[0];
 					int dy = p2[2] - p0[2];
 					int len = dx*dx + dy*dy;
@@ -414,8 +330,8 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 		}
 		
 		int i = mini;
-		int i1 = next(i, n);
-		int i2 = next(i1, n);
+		int i1 = nextWrapped(i, n);
+		int i2 = nextWrapped(i1, n);
 		
 		*dst++ = indices[i] & 0x0fffffff;
 		*dst++ = indices[i1] & 0x0fffffff;
@@ -428,14 +344,14 @@ static int triangulate(int n, const int* verts, int* indices, int* tris)
 			indices[k] = indices[k+1];
 		
 		if (i1 >= n) i1 = 0;
-		i = prev(i1,n);
+		i = prevWrapped(i1,n);
 		// Update diagonal flags.
-		if (diagonal(prev(i, n), i1, n, verts, indices))
+		if (diagonal(prevWrapped(i, n), i1, n, verts, indices))
 			indices[i] |= 0x80000000;
 		else
 			indices[i] &= 0x0fffffff;
 		
-		if (diagonal(i, next(i1, n), n, verts, indices))
+		if (diagonal(i, nextWrapped(i1, n), n, verts, indices))
 			indices[i1] |= 0x80000000;
 		else
 			indices[i1] &= 0x0fffffff;
@@ -456,12 +372,6 @@ static int countPolyVerts(const unsigned short* p, const int nvp)
 		if (p[i] == RC_MESH_NULL_IDX)
 			return i;
 	return nvp;
-}
-
-inline bool uleft(const unsigned short* a, const unsigned short* b, const unsigned short* c)
-{
-	return ((int)b[0] - (int)a[0]) * ((int)c[2] - (int)a[2]) -
-		   ((int)c[0] - (int)a[0]) * ((int)b[2] - (int)a[2]) < 0;
 }
 
 static int getPolyMergeValue(unsigned short* pa, unsigned short* pb,

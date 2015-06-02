@@ -21,6 +21,7 @@
 #include "DetourStatus.h"
 #include "DetourAssert.h"
 #include "DetourTileCacheBuilder.h"
+#include "RecastShared.h"
 #include <string.h>
 
 
@@ -531,30 +532,6 @@ static bool walkContour(dtTileCacheLayer& layer, int x, int y, dtTempContour& co
 	return true;
 }	
 
-
-static float distancePtSeg(const int x, const int z,
-						   const int px, const int pz,
-						   const int qx, const int qz)
-{
-	float pqx = (float)(qx - px);
-	float pqz = (float)(qz - pz);
-	float dx = (float)(x - px);
-	float dz = (float)(z - pz);
-	float d = pqx*pqx + pqz*pqz;
-	float t = pqx*dx + pqz*dz;
-	if (d > 0)
-		t /= d;
-	if (t < 0)
-		t = 0;
-	else if (t > 1)
-		t = 1;
-	
-	dx = px + t*pqx - x;
-	dz = pz + t*pqz - z;
-	
-	return dx*dx + dz*dz;
-}
-
 static void simplifyContour(dtTempContour& cont, const float maxError)
 {
 	cont.npoly = 0;
@@ -869,14 +846,6 @@ static unsigned short addVertex(unsigned short x, unsigned short y, unsigned sho
 	return (unsigned short)i;
 }
 
-
-struct rcEdge
-{
-	unsigned short vert[2];
-	unsigned short polyEdge[2];
-	unsigned short poly[2];
-};
-
 static bool buildMeshAdjacency(dtTileCacheAlloc* alloc,
 							   unsigned short* polys, const int npolys,
 							   const unsigned short* verts, const int nverts,
@@ -1067,87 +1036,6 @@ static bool buildMeshAdjacency(dtTileCacheAlloc* alloc,
 	return true;
 }
 
-
-// Last time I checked the if version got compiled using cmov, which was a lot faster than module (with idiv).
-inline int prev(int i, int n) { return i-1 >= 0 ? i-1 : n-1; }
-inline int next(int i, int n) { return i+1 < n ? i+1 : 0; }
-
-inline int area2(const unsigned char* a, const unsigned char* b, const unsigned char* c)
-{
-	return ((int)b[0] - (int)a[0]) * ((int)c[2] - (int)a[2]) - ((int)c[0] - (int)a[0]) * ((int)b[2] - (int)a[2]);
-}
-
-//	Exclusive or: true iff exactly one argument is true.
-//	The arguments are negated to ensure that they are 0/1
-//	values.  Then the bitwise Xor operator may apply.
-//	(This idea is due to Michael Baldwin.)
-inline bool xorb(bool x, bool y)
-{
-	return !x ^ !y;
-}
-
-// Returns true iff c is strictly to the left of the directed
-// line through a to b.
-inline bool left(const unsigned char* a, const unsigned char* b, const unsigned char* c)
-{
-	return area2(a, b, c) < 0;
-}
-
-inline bool leftOn(const unsigned char* a, const unsigned char* b, const unsigned char* c)
-{
-	return area2(a, b, c) <= 0;
-}
-
-inline bool collinear(const unsigned char* a, const unsigned char* b, const unsigned char* c)
-{
-	return area2(a, b, c) == 0;
-}
-
-//	Returns true iff ab properly intersects cd: they share
-//	a point interior to both segments.  The properness of the
-//	intersection is ensured by using strict leftness.
-static bool intersectProp(const unsigned char* a, const unsigned char* b,
-						  const unsigned char* c, const unsigned char* d)
-{
-	// Eliminate improper cases.
-	if (collinear(a,b,c) || collinear(a,b,d) ||
-		collinear(c,d,a) || collinear(c,d,b))
-		return false;
-	
-	return xorb(left(a,b,c), left(a,b,d)) && xorb(left(c,d,a), left(c,d,b));
-}
-
-// Returns T iff (a,b,c) are collinear and point c lies 
-// on the closed segement ab.
-static bool between(const unsigned char* a, const unsigned char* b, const unsigned char* c)
-{
-	if (!collinear(a, b, c))
-		return false;
-	// If ab not vertical, check betweenness on x; else on y.
-	if (a[0] != b[0])
-		return ((a[0] <= c[0]) && (c[0] <= b[0])) || ((a[0] >= c[0]) && (c[0] >= b[0]));
-	else
-		return ((a[2] <= c[2]) && (c[2] <= b[2])) || ((a[2] >= c[2]) && (c[2] >= b[2]));
-}
-
-// Returns true iff segments ab and cd intersect, properly or improperly.
-static bool intersect(const unsigned char* a, const unsigned char* b,
-					  const unsigned char* c, const unsigned char* d)
-{
-	if (intersectProp(a, b, c, d))
-		return true;
-	else if (between(a, b, c) || between(a, b, d) ||
-			 between(c, d, a) || between(c, d, b))
-		return true;
-	else
-		return false;
-}
-
-static bool vequal(const unsigned char* a, const unsigned char* b)
-{
-	return a[0] == b[0] && a[2] == b[2];
-}
-
 // Returns T iff (v_i, v_j) is a proper internal *or* external
 // diagonal of P, *ignoring edges incident to v_i and v_j*.
 static bool diagonalie(int i, int j, int n, const unsigned char* verts, const unsigned short* indices)
@@ -1158,7 +1046,7 @@ static bool diagonalie(int i, int j, int n, const unsigned char* verts, const un
 	// For each edge (k,k+1) of P
 	for (int k = 0; k < n; k++)
 	{
-		int k1 = next(k, n);
+		int k1 = nextWrapped(k, n);
 		// Skip edges incident to i or j
 		if (!((k == i) || (k1 == i) || (k == j) || (k1 == j)))
 		{
@@ -1181,8 +1069,8 @@ static bool	inCone(int i, int j, int n, const unsigned char* verts, const unsign
 {
 	const unsigned char* pi = &verts[(indices[i] & 0x7fff) * 4];
 	const unsigned char* pj = &verts[(indices[j] & 0x7fff) * 4];
-	const unsigned char* pi1 = &verts[(indices[next(i, n)] & 0x7fff) * 4];
-	const unsigned char* pin1 = &verts[(indices[prev(i, n)] & 0x7fff) * 4];
+	const unsigned char* pi1 = &verts[(indices[nextWrapped(i, n)] & 0x7fff) * 4];
+	const unsigned char* pin1 = &verts[(indices[prevWrapped(i, n)] & 0x7fff) * 4];
 	
 	// If P[i] is a convex vertex [ i+1 left or on (i-1,i) ].
 	if (leftOn(pin1, pi, pi1))
@@ -1207,8 +1095,8 @@ static int triangulate(int n, const unsigned char* verts, unsigned short* indice
 	// The last bit of the index is used to indicate if the vertex can be removed.
 	for (int i = 0; i < n; i++)
 	{
-		int i1 = next(i, n);
-		int i2 = next(i1, n);
+		int i1 = nextWrapped(i, n);
+		int i2 = nextWrapped(i1, n);
 		if (diagonal(i, i2, n, verts, indices))
 			indices[i1] |= 0x8000;
 	}
@@ -1219,11 +1107,11 @@ static int triangulate(int n, const unsigned char* verts, unsigned short* indice
 		int mini = -1;
 		for (int i = 0; i < n; i++)
 		{
-			int i1 = next(i, n);
+			int i1 = nextWrapped(i, n);
 			if (indices[i1] & 0x8000)
 			{
 				const unsigned char* p0 = &verts[(indices[i] & 0x7fff) * 4];
-				const unsigned char* p2 = &verts[(indices[next(i1, n)] & 0x7fff) * 4];
+				const unsigned char* p2 = &verts[(indices[nextWrapped(i1, n)] & 0x7fff) * 4];
 				
 				const int dx = (int)p2[0] - (int)p0[0];
 				const int dz = (int)p2[2] - (int)p0[2];
@@ -1249,8 +1137,8 @@ static int triangulate(int n, const unsigned char* verts, unsigned short* indice
 		}
 		
 		int i = mini;
-		int i1 = next(i, n);
-		int i2 = next(i1, n);
+		int i1 = nextWrapped(i, n);
+		int i2 = nextWrapped(i1, n);
 		
 		*dst++ = indices[i] & 0x7fff;
 		*dst++ = indices[i1] & 0x7fff;
@@ -1263,14 +1151,14 @@ static int triangulate(int n, const unsigned char* verts, unsigned short* indice
 			indices[k] = indices[k+1];
 		
 		if (i1 >= n) i1 = 0;
-		i = prev(i1,n);
+		i = prevWrapped(i1,n);
 		// Update diagonal flags.
-		if (diagonal(prev(i, n), i1, n, verts, indices))
+		if (diagonal(prevWrapped(i, n), i1, n, verts, indices))
 			indices[i] |= 0x8000;
 		else
 			indices[i] &= 0x7fff;
 		
-		if (diagonal(i, next(i1, n), n, verts, indices))
+		if (diagonal(i, nextWrapped(i1, n), n, verts, indices))
 			indices[i1] |= 0x8000;
 		else
 			indices[i1] &= 0x7fff;
@@ -1293,13 +1181,6 @@ static int countPolyVerts(const unsigned short* p)
 			return i;
 	return MAX_VERTS_PER_POLY;
 }
-
-inline bool uleft(const unsigned short* a, const unsigned short* b, const unsigned short* c)
-{
-	return ((int)b[0] - (int)a[0]) * ((int)c[2] - (int)a[2]) -
-	((int)c[0] - (int)a[0]) * ((int)b[2] - (int)a[2]) < 0;
-}
-
 static int getPolyMergeValue(unsigned short* pa, unsigned short* pb,
 							 const unsigned short* verts, int& ea, int& eb)
 {

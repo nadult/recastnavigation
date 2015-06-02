@@ -39,7 +39,7 @@
 #endif
 
 
-static bool isectSegAABB(const float* sp, const float* sq,
+static bool isectSegAABB0(const float* sp, const float* sq,
 						 const float* amin, const float* amax,
 						 float& tmin, float& tmax)
 {
@@ -771,7 +771,7 @@ int CrowdToolState::hitTestAgents(const float* s, const float* p)
 		float bmin[3], bmax[3];
 		getAgentBounds(ag, bmin, bmax);
 		float tmin, tmax;
-		if (isectSegAABB(s, p, bmin,bmax, tmin, tmax))
+		if (isectSegAABB0(s, p, bmin,bmax, tmin, tmax))
 		{
 			if (tmin > 0 && tmin < tsel)
 			{

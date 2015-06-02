@@ -40,6 +40,8 @@
 #	define putenv _putenv
 #endif
 
+#include <unistd.h>
+
 struct SampleItem
 {
 	Sample* (*create)();
@@ -63,6 +65,8 @@ static const int g_nsamples = sizeof(g_samples)/sizeof(SampleItem);
 
 int main(int /*argc*/, char** /*argv*/)
 {
+	chdir("recast/RecastDemo/Bin");
+
 	// Init SDL
 	if (SDL_Init(SDL_INIT_EVERYTHING) != 0)
 	{
